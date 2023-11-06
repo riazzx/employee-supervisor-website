@@ -2,10 +2,20 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { body, param, validationResult } = require('express-validator');
 const { MongoClient, ObjectId } = require('mongodb');
+const cors = require('cors');
 
 const app = express();
 
 app.use(bodyParser.json());
+
+// cors policy
+app.use(cors())
+
+// middleware to allow cors
+app.use((req,res,next)=> {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    next()
+  })
 
 // logger middleware
 app.use((req,res,next)=> {
@@ -26,6 +36,25 @@ console.log('Connected to MongoDB Atlas');
 
 const db = client.db('employeesDB');
 const employees = db.collection('employees');
+const admin = db.collection('admin');
+
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+  
+    try {
+      const user = await admin.findOne({ username, password });
+  
+      if (user) {
+        res.status(200).json({ success: true });
+      } else {
+        res.status(401).json({ success: false, message: 'Invalid username or password' });
+      }
+  
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  });
 
 app.get('/employees', async (req, res) => {
     try {
@@ -36,6 +65,28 @@ app.get('/employees', async (req, res) => {
     } catch (error) {
       console.error('Error retrieving employees:', error);
       res.status(500).json({ error: 'Error retrieving employees' });
+    }
+  });
+
+// API endpoint to retrieve an employee's name by ID
+app.get('/employees/:id', async (req, res) => {
+    try {
+      const employeeId = req.params.id;
+     
+      const employeeObjectId = ObjectId(employeeId)
+  
+     
+      const employee = await employees.findOne({ _id: employeeObjectId});
+      
+      if (!employee) {
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+    //   console.log(employee.name)
+      res.status(200).json({ name: employee.name });
+      
+    } catch (error) {
+      console.error('Error retrieving employee name:', error);
+      res.status(500).json({ error: 'Error retrieving employee name' });
     }
   });
 
@@ -104,6 +155,7 @@ app.put('/setSupervisor/:employeeId', [
   
       // Check if the supervisor with the given ID exists
       const existingSupervisor = await employees.findOne({ _id: supervisorObjectID });
+      console.log(existingSupervisor)
   
       if (!existingSupervisor) {
         return res.status(404).json({ error: 'Supervisor not found' });
@@ -122,7 +174,7 @@ app.put('/setSupervisor/:employeeId', [
       // Update the employee's supervisor
       const result = await employees.updateOne(
         { _id: employeeObjectID },
-        { $set: { supervisor: supervisorObjectID } }
+        { $set: { supervisor: existingSupervisor.name } }
       );
   
       if (result.modifiedCount === 1) {
@@ -173,44 +225,44 @@ app.delete('/deleteEmployee/:employeeId', [
    
 
 
-app.get('/employeeHierarchy', async (req, res) => {
-    try {
+// app.get('/employeeHierarchy', async (req, res) => {
+//     try {
   
-      // Query all employees
-      const result = await employees.find().toArray();
+//       // Query all employees
+//       const result = await employees.find().toArray();
   
-      // Create a dictionary to store the hierarchy
-      const hierarchy = {};
+//       // Create a dictionary to store the hierarchy
+//       const hierarchy = {};
   
-      // Create a function to build the hierarchy recursively
-      function buildHierarchy(employee) {
-        const supervisor = employee.supervisor;
-        const employeeName = employee.name;
+//       // Create a function to build the hierarchy recursively
+//       function buildHierarchy(employee) {
+//         const supervisor = employee.supervisor;
+//         const employeeName = employee.name;
   
-        if (!supervisor) {
-          // Employee has no supervisor, add to the top level
-          hierarchy[employeeName] = [];
-        } else {
-          // Employee has a supervisor, add to their supervisor's hierarchy
-          if (hierarchy[supervisor]) {
-            hierarchy[supervisor].push({ [employeeName]: [] });
-          } else {
-            // Create a new hierarchy for the supervisor
-            hierarchy[supervisor] = [{ [employeeName]: [] }];
-          }
-        }
-      }
+//         if (!supervisor) {
+//           // Employee has no supervisor, add to the top level
+//           hierarchy[employeeName] = [];
+//         } else {
+//           // Employee has a supervisor, add to their supervisor's hierarchy
+//           if (hierarchy[supervisor]) {
+//             hierarchy[supervisor].push({ [employeeName]: [] });
+//           } else {
+//             // Create a new hierarchy for the supervisor
+//             hierarchy[supervisor] = [{ [employeeName]: [] }];
+//           }
+//         }
+//       }
   
-      // Build the hierarchy for each employee
-      result.forEach(buildHierarchy);
+//       // Build the hierarchy for each employee
+//       result.forEach(buildHierarchy);
   
   
-      res.status(200).json(hierarchy);
-    } catch (error) {
-      console.error('Error retrieving employee hierarchy:', error);
-      res.status(500).json({ error: 'Error retrieving employee hierarchy' });
-    }
-  });
+//       res.status(200).json(hierarchy);
+//     } catch (error) {
+//       console.error('Error retrieving employee hierarchy:', error);
+//       res.status(500).json({ error: 'Error retrieving employee hierarchy' });
+//     }
+//   });
 
 
 
@@ -240,7 +292,7 @@ app.get('/employeeHierarchy', async (req, res) => {
           hierarchy[employeeId] = employeeMap[employeeId];
         } else {
           // Add the employee as a subordinate to their supervisor
-          const supervisorId = employee.supervisor.toString();
+          const supervisorId = employee.supervisor;
           if (employeeMap[supervisorId]) {
             employeeMap[supervisorId].subordinates.push(employeeMap[employeeId]);
           }
@@ -257,6 +309,40 @@ app.get('/employeeHierarchy', async (req, res) => {
       res.status(500).json({ error: 'Error retrieving employee hierarchy' });
     }
   });
+
+  app.get('/employeeHierarchy', async (req, res) => {
+    try {
+      const employeesList = await employees.find().toArray();
+      const hierarchy = {};
+  
+      employeesList.forEach((employee) => {
+        if (!employee.supervisor) {
+          // If no supervisor, consider it a root employee
+          hierarchy[employee.name] = constructHierarchy(employeesList, employee.name);
+        }
+      });
+  
+      res.status(200).json(hierarchy);
+    } catch (error) {
+      console.error('Error retrieving employee hierarchy:', error);
+      res.status(500).json({ error: 'Error retrieving employee hierarchy' });
+    }
+  });
+  
+  function constructHierarchy(employeesList, supervisorName) {
+    const hierarchy = [];
+    const subordinates = employeesList.filter((employee) => employee.supervisor === supervisorName);
+  
+    subordinates.forEach((subordinate) => {
+      const hierarchyEntry = {
+        [subordinate.name]: constructHierarchy(employeesList, subordinate.name),
+      };
+      hierarchy.push(hierarchyEntry);
+    });
+  
+    return hierarchy.length > 0 ? hierarchy : [];
+  }
+  
   
 
 
