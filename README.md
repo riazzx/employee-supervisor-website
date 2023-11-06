@@ -10,7 +10,7 @@
 npm install
 ```
 
-### Compiles and hot-reloads for development
+### Start React App
 
 ```
 npm start
