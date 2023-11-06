@@ -2,6 +2,8 @@
 
 ## Instructions
 
+-   Clone repository.
+
 ## Project setup
 
 ```
